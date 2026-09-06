@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const Post = require("../models/Post");
 const User = require("../models/User");
+const Notification = require("../models/Notification");
 
 // CREATE POST
 router.post("/" , async (req, res) => {
@@ -53,8 +54,57 @@ router.put("/:id/like" , async (req, res) => {
     }
     try {
         const post = await Post.findById(req.params.id);
+        if (!post) {
+            return res.status(404).json({ error: "Post not found" });
+        }
         if (!post.likes.includes(req.body.userId)) {
-            await post.updateOne({$push: { likes: req.body.userId}})
+            await post.updateOne({$push: { likes: req.body.userId}});
+
+            // Send notification to post owner if liking someone else's post
+            if (post.userId && post.userId !== req.body.userId) {
+                try {
+                    const sender = await User.findById(req.body.userId);
+                    const receiver = await User.findById(post.userId);
+                    if (sender && receiver) {
+                        const notif = new Notification({
+                            receiverId: receiver._id.toString(),
+                            receiverName: receiver.username,
+                            senderId: sender._id.toString(),
+                            senderName: sender.username,
+                            senderProfilePicture: sender.profilePicture || "",
+                            type: "like",
+                            postId: post._id.toString(),
+                            text: "liked your post.",
+                            isRead: false,
+                        });
+                        await notif.save();
+
+                        const io = req.app.get("io");
+                        const getUser = req.app.get("getUser");
+                        if (io && getUser) {
+                            const onlineReceiver = getUser(receiver.username);
+                            if (onlineReceiver) {
+                                io.to(onlineReceiver.socketId).emit("getNotification", {
+                                    _id: notif._id,
+                                    id: notif._id,
+                                    senderId: sender._id.toString(),
+                                    senderName: sender.username,
+                                    senderProfilePicture: sender.profilePicture,
+                                    receiverName: receiver.username,
+                                    type: "like",
+                                    postId: post._id.toString(),
+                                    text: "liked your post.",
+                                    createdAt: notif.createdAt,
+                                    isRead: false,
+                                });
+                            }
+                        }
+                    }
+                } catch (notifErr) {
+                    console.error("Failed to create like notification:", notifErr);
+                }
+            }
+
             res.status(200).json("The post has been liked");
         } else {
             await post.updateOne({$pull: {likes: req.body.userId}});
@@ -63,7 +113,7 @@ router.put("/:id/like" , async (req, res) => {
     } catch (err) {
         res.status(500).json({error: err.message})
     }
-})
+});
 
 // GET ALL POSTS
 router.get("/all" , async (req , res) => {

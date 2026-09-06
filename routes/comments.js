@@ -1,5 +1,8 @@
 const router = require("express").Router();
 const Comment = require("../models/Comment");
+const Post = require("../models/Post");
+const User = require("../models/User");
+const Notification = require("../models/Notification");
 
 // CREATE COMMENT OR REPLY
 router.post("/", async (req, res) => {
@@ -24,6 +27,72 @@ router.post("/", async (req, res) => {
     });
 
     const savedComment = await newComment.save();
+
+    // Create notification for post owner or parent comment author
+    try {
+      let receiverUserId = null;
+      let notifType = "comment";
+      let notifText = "commented on your post.";
+
+      if (parentId) {
+        // Reply to a comment
+        const parentComment = await Comment.findById(parentId);
+        if (parentComment) {
+          receiverUserId = parentComment.userId;
+          notifType = "reply";
+          notifText = "replied to your comment.";
+        }
+      } else {
+        // Top-level comment on post
+        const post = await Post.findById(postId);
+        if (post) {
+          receiverUserId = post.userId;
+        }
+      }
+
+      if (receiverUserId && receiverUserId.toString() !== userId.toString()) {
+        const receiver = await User.findById(receiverUserId);
+        const sender = await User.findById(userId);
+        if (receiver && sender) {
+          const notif = new Notification({
+            receiverId: receiver._id.toString(),
+            receiverName: receiver.username,
+            senderId: sender._id.toString(),
+            senderName: sender.username,
+            senderProfilePicture: sender.profilePicture || "",
+            type: notifType,
+            postId: postId.toString(),
+            text: notifText,
+            isRead: false,
+          });
+          await notif.save();
+
+          const io = req.app.get("io");
+          const getUser = req.app.get("getUser");
+          if (io && getUser) {
+            const onlineReceiver = getUser(receiver.username);
+            if (onlineReceiver) {
+              io.to(onlineReceiver.socketId).emit("getNotification", {
+                _id: notif._id,
+                id: notif._id,
+                senderId: sender._id.toString(),
+                senderName: sender.username,
+                senderProfilePicture: sender.profilePicture,
+                receiverName: receiver.username,
+                type: notifType,
+                postId: postId.toString(),
+                text: notifText,
+                createdAt: notif.createdAt,
+                isRead: false,
+              });
+            }
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.error("Failed to generate comment notification:", notifErr);
+    }
+
     res.status(200).json(savedComment);
   } catch (err) {
     console.error("Failed to create comment:", err);

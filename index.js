@@ -20,6 +20,8 @@ const authRoute = require("./routes/auth");
 const postRoute = require("./routes/posts");
 const aiRoute = require("./routes/ai");
 const commentRoute = require("./routes/comments");
+const notificationRoute = require("./routes/notifications");
+const Notification = require("./models/Notification");
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URL || process.env.MONGO_URI;
@@ -104,6 +106,7 @@ app.use("/api/users", userRoute);
 app.use("/api/posts", postRoute);
 app.use("/api/ai", aiRoute);
 app.use("/api/comments", commentRoute);
+app.use("/api/notifications", notificationRoute);
 
 // Root Route
 app.get("/", (req, res) => {
@@ -118,7 +121,10 @@ const { Server } = require("socket.io");
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      // Allow all origins (Vercel, localhost, local network, etc.)
+      callback(null, true);
+    },
     credentials: true,
   },
 });
@@ -126,8 +132,10 @@ const io = new Server(server, {
 let onlineUsers = [];
 
 const addNewUser = (username, socketId) => {
-  !onlineUsers.some((user) => user.username === username) &&
-    onlineUsers.push({ username, socketId });
+  if (!username) return;
+  // Always update to the latest socketId on reconnect/refresh
+  onlineUsers = onlineUsers.filter((user) => user.username.toLowerCase() !== username.toLowerCase());
+  onlineUsers.push({ username, socketId });
 };
 
 const removeUser = (socketId) => {
@@ -135,30 +143,67 @@ const removeUser = (socketId) => {
 };
 
 const getUser = (username) => {
-  return onlineUsers.find((user) => user.username === username);
+  if (!username) return null;
+  return onlineUsers.find((user) => user.username.toLowerCase() === username.toLowerCase());
 };
 
+// Expose io and getUser to express routes
+app.set("io", io);
+app.set("getUser", getUser);
+
 io.on("connection", (socket) => {
-  // console.log("a user connected");
-  
   socket.on("newUser", (username) => {
     addNewUser(username, socket.id);
   });
 
-  socket.on("sendNotification", ({ senderName, senderProfilePicture, receiverName, type, postId }) => {
+  socket.on("sendNotification", async (data) => {
+    const {
+      senderId,
+      senderName,
+      senderProfilePicture,
+      receiverId,
+      receiverName,
+      type,
+      postId,
+      text,
+    } = data;
+
+    // Persist to MongoDB so notifications are never lost
+    if ((receiverId || receiverName) && (senderId || senderName) && type) {
+      try {
+        const notifDoc = new Notification({
+          receiverId: receiverId || receiverName,
+          receiverName: receiverName || "",
+          senderId: senderId || senderName,
+          senderName: senderName || "User",
+          senderProfilePicture: senderProfilePicture || "",
+          type,
+          postId: postId || "",
+          text: text || "",
+          isRead: false,
+        });
+        await notifDoc.save();
+      } catch (e) {
+        console.error("Socket notification save error:", e);
+      }
+    }
+
     const receiver = getUser(receiverName);
-    if(receiver) {
+    if (receiver) {
       io.to(receiver.socketId).emit("getNotification", {
+        senderId,
         senderName,
         senderProfilePicture,
+        receiverName,
         type,
         postId,
+        text,
+        createdAt: new Date().toISOString(),
       });
     }
   });
 
   socket.on("disconnect", () => {
-    // console.log("user disconnected");
     removeUser(socket.id);
   });
 });

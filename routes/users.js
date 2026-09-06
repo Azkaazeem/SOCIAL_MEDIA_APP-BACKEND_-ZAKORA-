@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const User = require("../models/User");
+const Notification = require("../models/Notification");
 const bcrypt = require("bcrypt");
 
 // UPDATE USER
@@ -143,6 +144,46 @@ router.put("/:id/follow", async (req, res) => {
             if (!user.followers.includes(req.body.userId)) {
                 await user.updateOne({ $push: { followers: req.body.userId } });
                 await currentUser.updateOne({ $push: { followings: req.params.id } });
+
+                // Create follow notification
+                try {
+                    const notif = new Notification({
+                        receiverId: user._id.toString(),
+                        receiverName: user.username,
+                        senderId: currentUser._id.toString(),
+                        senderName: currentUser.username,
+                        senderProfilePicture: currentUser.profilePicture || "",
+                        type: "follow",
+                        postId: "",
+                        text: "started following you.",
+                        isRead: false,
+                    });
+                    await notif.save();
+
+                    const io = req.app.get("io");
+                    const getUser = req.app.get("getUser");
+                    if (io && getUser) {
+                        const onlineReceiver = getUser(user.username);
+                        if (onlineReceiver) {
+                            io.to(onlineReceiver.socketId).emit("getNotification", {
+                                _id: notif._id,
+                                id: notif._id,
+                                senderId: currentUser._id.toString(),
+                                senderName: currentUser.username,
+                                senderProfilePicture: currentUser.profilePicture,
+                                receiverName: user.username,
+                                type: "follow",
+                                postId: "",
+                                text: "started following you.",
+                                createdAt: notif.createdAt,
+                                isRead: false,
+                            });
+                        }
+                    }
+                } catch (notifErr) {
+                    console.error("Failed to create follow notification:", notifErr);
+                }
+
                 res.status(200).json("User has been followed");
             } else {
                 res.status(403).json("You already follow this user");
