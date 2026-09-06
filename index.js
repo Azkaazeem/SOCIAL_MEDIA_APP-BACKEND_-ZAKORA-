@@ -19,6 +19,7 @@ const userRoute = require("./routes/users");
 const authRoute = require("./routes/auth");
 const postRoute = require("./routes/posts");
 const aiRoute = require("./routes/ai");
+const commentRoute = require("./routes/comments");
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URL || process.env.MONGO_URI;
@@ -102,6 +103,7 @@ app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
 app.use("/api/posts", postRoute);
 app.use("/api/ai", aiRoute);
+app.use("/api/comments", commentRoute);
 
 // Root Route
 app.get("/", (req, res) => {
