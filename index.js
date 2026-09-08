@@ -1,18 +1,15 @@
 const express = require("express");
 const app = express();
+const path = require("path");
 const dotenv = require("dotenv");
-const dns = require("dns")
 
-dotenv.config();
-
-dns.setServers(['8.8.8.8', '1.1.1.1'])
-dotenv.config();
+// Load .env reliably from the backend directory
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const mongoose = require("mongoose");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const cors = require("cors");
-const path = require("path");
 const multer = require("multer");
 
 const userRoute = require("./routes/users");
@@ -24,7 +21,7 @@ const notificationRoute = require("./routes/notifications");
 const Notification = require("./models/Notification");
 
 // MongoDB Connection
-const MONGO_URI = process.env.MONGO_URL || process.env.MONGO_URI;
+const MONGO_URI = (process.env.MONGO_URL || process.env.MONGO_URI || "").trim();
 
 if (!MONGO_URI) {
   console.error("MONGO_URL is missing in environment variables!");
@@ -62,7 +59,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("/{*path}", cors(corsOptions)); // Handle all preflight requests directly
 
 // Static files for images
 app.use("/images", express.static(path.join(__dirname, "public/images")));

@@ -20,31 +20,37 @@ router.post("/" , async (req, res) => {
 // UPDATE POST
 router.put("/:id" , async (req, res) => {
     try {
-    const post = await Post.findById(req.params.id);
-    if(post.userId === req.body.userId) {
-        await post.updateOne({$set: req.body});
-        res.status(200).json("The post has been updated");
-    } else {
-        res.status(403).json("You can update only your post!");
+        const post = await Post.findById(req.params.id);
+        if (!post) {
+            return res.status(404).json({ error: "Post not found" });
+        }
+        if(post.userId === req.body.userId) {
+            await post.updateOne({$set: req.body});
+            res.status(200).json("The post has been updated");
+        } else {
+            res.status(403).json("You can update only your post!");
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-} catch (err) {
-    res.status(500).json({ error: err.message });
-}
 });
 
 // DELETE POST
 router.delete("/:id" , async (req, res) => {
     try {
-    const post = await Post.findById(req.params.id);
-    if(post.userId === req.body.userId) {
-        await post.deleteOne({$set: req.body});
-        res.status(200).json("The post has been deleted");
-    } else {
-        res.status(403).json("You can delete only your post!");
+        const post = await Post.findById(req.params.id);
+        if (!post) {
+            return res.status(404).json({ error: "Post not found" });
+        }
+        if(post.userId === req.body.userId) {
+            await post.deleteOne();
+            res.status(200).json("The post has been deleted");
+        } else {
+            res.status(403).json("You can delete only your post!");
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-} catch (err) {
-    res.status(500).json({ error: err.message });
-}
 });
 
 // LIKE / UNLIKE POST
