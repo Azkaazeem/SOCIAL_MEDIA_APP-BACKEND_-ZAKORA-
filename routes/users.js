@@ -62,13 +62,20 @@ router.get("/", async (req, res) => {
     const userId = req.query.userId;
     const username = req.query.username;
     try {
-        const user = userId ? await User.findById(userId) : await User.findOne({ username: username });
+        if (!userId && !username) {
+            return res.status(400).json({ error: "userId or username query parameter is required" });
+        }
+        const user = userId 
+            ? await User.findById(userId) 
+            : await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
         const { password, updatedAt, ...other } = user._doc;
         res.status(200).json(other);
     } catch (err) {
         res.status(500).json(err);
     }
-
 });
 
 // GET ALL USERS
@@ -84,9 +91,13 @@ router.get("/all", async (req, res) => {
 // GET USER FRIENDS (Legacy - used for Home Rightbar)
 router.get("/friends/:userId", async (req, res) => {
     try {
+        if (!req.params.userId || req.params.userId === "undefined") {
+            return res.status(200).json([]);
+        }
         const user = await User.findById(req.params.userId);
+        if (!user) return res.status(200).json([]);
         const friends = await Promise.all(
-            user.followings.map(friendId => {
+            (user.followings || []).map(friendId => {
                 return User.findById(friendId);
             })
         );
@@ -106,8 +117,11 @@ router.get("/friends/:userId", async (req, res) => {
 // GET USER CONNECTIONS (Followers, Followings, Mutual Friends)
 router.get("/connections/:userId", async (req, res) => {
     try {
+        if (!req.params.userId || req.params.userId === "undefined") {
+            return res.status(200).json({ mutuals: [], followers: [], followings: [] });
+        }
         const user = await User.findById(req.params.userId);
-        if (!user) return res.status(404).json("User not found");
+        if (!user) return res.status(200).json({ mutuals: [], followers: [], followings: [] });
 
         const followersIds = user.followers || [];
         const followingsIds = user.followings || [];

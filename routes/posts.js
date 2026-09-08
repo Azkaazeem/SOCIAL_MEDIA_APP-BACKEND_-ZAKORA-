@@ -128,10 +128,16 @@ router.get("/all" , async (req , res) => {
 // GET TIMELINE POSTS
 router.get("/timeline/:userId" , async (req , res) => {
     try {
+        if (!req.params.userId || req.params.userId === "undefined") {
+            return res.status(200).json([]);
+        }
         const currentUser = await User.findById(req.params.userId);
+        if (!currentUser) {
+            return res.status(200).json([]);
+        }
         const userPost = await Post.find({ userId: currentUser._id });
         const friendPosts = await Promise.all(
-            currentUser.followings.map((friendId) => {
+            (currentUser.followings || []).map((friendId) => {
                 return Post.find({ userId: friendId });
             })
         );
@@ -145,6 +151,9 @@ router.get("/timeline/:userId" , async (req , res) => {
 router.get("/:id" , async (req, res) => {
     try {
         const post = await Post.findById(req.params.id);
+        if (!post) {
+            return res.status(404).json({ error: "Post not found" });
+        }
         res.status(200).json(post);
     } catch (err) {
         res.status(500).json({error: err.message});
@@ -154,8 +163,16 @@ router.get("/:id" , async (req, res) => {
 // GET USER'S ALL POSTS
 router.get("/profile/:username" , async (req , res) => {
     try {
-        const user = await User.findOne({username: req.params.username });
-        const posts = await Post.find({ userId: user._id });
+        const username = req.params.username;
+        if (!username || username === "undefined") {
+            return res.status(200).json([]);
+        }
+        // Case-insensitive lookup so funwithme and funWithMe both match
+        const user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        if (!user) {
+            return res.status(200).json([]);
+        }
+        const posts = await Post.find({ userId: user._id }).sort({ createdAt: -1 });
         res.status(200).json(posts);
     } catch (err) {
         res.status(500).json({error: err.message});
