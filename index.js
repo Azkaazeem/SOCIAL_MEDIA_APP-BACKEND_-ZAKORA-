@@ -164,9 +164,25 @@ io.on("connection", (socket) => {
       text,
     } = data;
 
-    // Persist to MongoDB so notifications are never lost
+    // Deduplication check: prevent duplicate notifications within 5 seconds
     if ((receiverId || receiverName) && (senderId || senderName) && type) {
       try {
+        const queryOr = [];
+        if (receiverId) queryOr.push({ receiverId: receiverId.toString() });
+        if (receiverName) queryOr.push({ receiverName: receiverName });
+
+        const existing = await Notification.findOne({
+          $or: queryOr,
+          type,
+          postId: postId ? postId.toString() : "",
+          createdAt: { $gte: new Date(Date.now() - 5000) },
+        });
+
+        if (existing) {
+          // Already saved/emitted by REST controller or recent socket, ignore duplicate
+          return;
+        }
+
         const notifDoc = new Notification({
           receiverId: receiverId || receiverName,
           receiverName: receiverName || "",
@@ -179,29 +195,42 @@ io.on("connection", (socket) => {
           isRead: false,
         });
         await notifDoc.save();
+
+        const receiver = getUser(receiverName);
+        if (receiver) {
+          io.to(receiver.socketId).emit("getNotification", {
+            _id: notifDoc._id,
+            id: notifDoc._id,
+            senderId,
+            senderName,
+            senderProfilePicture,
+            receiverName,
+            type,
+            postId,
+            text,
+            createdAt: notifDoc.createdAt,
+            isRead: false,
+          });
+        }
       } catch (e) {
         console.error("Socket notification save error:", e);
       }
-    }
-
-    const receiver = getUser(receiverName);
-    if (receiver) {
-      io.to(receiver.socketId).emit("getNotification", {
-        senderId,
-        senderName,
-        senderProfilePicture,
-        receiverName,
-        type,
-        postId,
-        text,
-        createdAt: new Date().toISOString(),
-      });
     }
   });
 
   socket.on("disconnect", () => {
     removeUser(socket.id);
   });
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n⚠️ Port ${PORT} is already in use by another process!`);
+    console.error(`Backend pehle se background me port ${PORT} par chal raha hai.`);
+  } else {
+    console.error("Server error:", err);
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, () => {

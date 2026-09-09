@@ -72,37 +72,47 @@ router.put("/:id/like" , async (req, res) => {
                     const sender = await User.findById(req.body.userId);
                     const receiver = await User.findById(post.userId);
                     if (sender && receiver) {
-                        const notif = new Notification({
+                        const existingNotif = await Notification.findOne({
                             receiverId: receiver._id.toString(),
-                            receiverName: receiver.username,
                             senderId: sender._id.toString(),
-                            senderName: sender.username,
-                            senderProfilePicture: sender.profilePicture || "",
                             type: "like",
                             postId: post._id.toString(),
-                            text: "liked your post.",
-                            isRead: false,
+                            createdAt: { $gte: new Date(Date.now() - 5000) }
                         });
-                        await notif.save();
 
-                        const io = req.app.get("io");
-                        const getUser = req.app.get("getUser");
-                        if (io && getUser) {
-                            const onlineReceiver = getUser(receiver.username);
-                            if (onlineReceiver) {
-                                io.to(onlineReceiver.socketId).emit("getNotification", {
-                                    _id: notif._id,
-                                    id: notif._id,
-                                    senderId: sender._id.toString(),
-                                    senderName: sender.username,
-                                    senderProfilePicture: sender.profilePicture,
-                                    receiverName: receiver.username,
-                                    type: "like",
-                                    postId: post._id.toString(),
-                                    text: "liked your post.",
-                                    createdAt: notif.createdAt,
-                                    isRead: false,
-                                });
+                        if (!existingNotif) {
+                            const notif = new Notification({
+                                receiverId: receiver._id.toString(),
+                                receiverName: receiver.username,
+                                senderId: sender._id.toString(),
+                                senderName: sender.username,
+                                senderProfilePicture: sender.profilePicture || "",
+                                type: "like",
+                                postId: post._id.toString(),
+                                text: "liked your post.",
+                                isRead: false,
+                            });
+                            await notif.save();
+
+                            const io = req.app.get("io");
+                            const getUser = req.app.get("getUser");
+                            if (io && getUser) {
+                                const onlineReceiver = getUser(receiver.username);
+                                if (onlineReceiver) {
+                                    io.to(onlineReceiver.socketId).emit("getNotification", {
+                                        _id: notif._id,
+                                        id: notif._id,
+                                        senderId: sender._id.toString(),
+                                        senderName: sender.username,
+                                        senderProfilePicture: sender.profilePicture,
+                                        receiverName: receiver.username,
+                                        type: "like",
+                                        postId: post._id.toString(),
+                                        text: "liked your post.",
+                                        createdAt: notif.createdAt,
+                                        isRead: false,
+                                    });
+                                }
                             }
                         }
                     }
@@ -118,6 +128,21 @@ router.put("/:id/like" , async (req, res) => {
         }
     } catch (err) {
         res.status(500).json({error: err.message})
+    }
+});
+
+// GET USERS WHO LIKED A POST
+router.get("/:id/likes", async (req, res) => {
+    try {
+        const post = await Post.findById(req.params.id);
+        if (!post) {
+            return res.status(404).json({ error: "Post not found" });
+        }
+        const users = await User.find({ _id: { $in: post.likes } })
+            .select("_id username profilePicture desc");
+        res.status(200).json(users);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -173,8 +198,11 @@ router.get("/profile/:username" , async (req , res) => {
         if (!username || username === "undefined") {
             return res.status(200).json([]);
         }
-        // Case-insensitive lookup so funwithme and funWithMe both match
-        const user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        // First attempt exact match so distinct accounts with differing casing (e.g. habiba vs Habiba) match accurately
+        let user = await User.findOne({ username: username });
+        if (!user) {
+            user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        }
         if (!user) {
             return res.status(200).json([]);
         }

@@ -65,9 +65,16 @@ router.get("/", async (req, res) => {
         if (!userId && !username) {
             return res.status(400).json({ error: "userId or username query parameter is required" });
         }
-        const user = userId 
-            ? await User.findById(userId) 
-            : await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+        let user = null;
+        if (userId) {
+            user = await User.findById(userId);
+        } else if (username) {
+            // Prioritize exact case match so accounts like 'habiba' and 'Habiba' resolve to their correct profiles
+            user = await User.findOne({ username: username });
+            if (!user) {
+                user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+            }
+        }
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -162,39 +169,48 @@ router.put("/:id/follow", async (req, res) => {
                 await user.updateOne({ $push: { followers: req.body.userId } });
                 await currentUser.updateOne({ $push: { followings: req.params.id } });
 
-                // Create follow notification
+                // Create follow notification (deduplicated within 5 seconds)
                 try {
-                    const notif = new Notification({
+                    const existingNotif = await Notification.findOne({
                         receiverId: user._id.toString(),
-                        receiverName: user.username,
                         senderId: currentUser._id.toString(),
-                        senderName: currentUser.username,
-                        senderProfilePicture: currentUser.profilePicture || "",
                         type: "follow",
-                        postId: "",
-                        text: "started following you.",
-                        isRead: false,
+                        createdAt: { $gte: new Date(Date.now() - 5000) }
                     });
-                    await notif.save();
 
-                    const io = req.app.get("io");
-                    const getUser = req.app.get("getUser");
-                    if (io && getUser) {
-                        const onlineReceiver = getUser(user.username);
-                        if (onlineReceiver) {
-                            io.to(onlineReceiver.socketId).emit("getNotification", {
-                                _id: notif._id,
-                                id: notif._id,
-                                senderId: currentUser._id.toString(),
-                                senderName: currentUser.username,
-                                senderProfilePicture: currentUser.profilePicture,
-                                receiverName: user.username,
-                                type: "follow",
-                                postId: "",
-                                text: "started following you.",
-                                createdAt: notif.createdAt,
-                                isRead: false,
-                            });
+                    if (!existingNotif) {
+                        const notif = new Notification({
+                            receiverId: user._id.toString(),
+                            receiverName: user.username,
+                            senderId: currentUser._id.toString(),
+                            senderName: currentUser.username,
+                            senderProfilePicture: currentUser.profilePicture || "",
+                            type: "follow",
+                            postId: "",
+                            text: "started following you.",
+                            isRead: false,
+                        });
+                        await notif.save();
+
+                        const io = req.app.get("io");
+                        const getUser = req.app.get("getUser");
+                        if (io && getUser) {
+                            const onlineReceiver = getUser(user.username);
+                            if (onlineReceiver) {
+                                io.to(onlineReceiver.socketId).emit("getNotification", {
+                                    _id: notif._id,
+                                    id: notif._id,
+                                    senderId: currentUser._id.toString(),
+                                    senderName: currentUser.username,
+                                    senderProfilePicture: currentUser.profilePicture,
+                                    receiverName: user.username,
+                                    type: "follow",
+                                    postId: "",
+                                    text: "started following you.",
+                                    createdAt: notif.createdAt,
+                                    isRead: false,
+                                });
+                            }
                         }
                     }
                 } catch (notifErr) {
