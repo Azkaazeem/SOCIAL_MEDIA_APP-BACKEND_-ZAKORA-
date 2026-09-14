@@ -4,52 +4,74 @@ const bcrypt = require("bcrypt");
 
 // REGISTER ROUTER
 router.post("/register", async (req, res) => {
-
-
     try {
+        const username = (req.body.username || "").trim();
+        const email = (req.body.email || "").trim().toLowerCase();
+        const password = req.body.password;
+
+        if (!email || !password || !username) {
+            return res.status(400).json({ message: "Username, email, and password are required." });
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: "An account with this email already exists." });
+        }
 
         // GENERATE NEW PASSWORD
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(req.body.password, salt);
+        const hashedPassword = await bcrypt.hash(password, salt);
 
         // CREATE NEW USER
         const newUser = new User({
-            username: req.body.username,
-            email: req.body.email,
+            username,
+            email,
             password: hashedPassword,
             dob: req.body.dob || "",
             profilePicture: req.body.profilePicture || "",
         });
 
-        // SAVE USER AND  RESPOND
+        // SAVE USER AND RESPOND
         const user = await newUser.save();
         res.status(200).json(user);
     } catch (err) {
-        res.status(500).json(err);
+        console.error("Register error:", err);
+        res.status(500).json({ message: err.message || "Registration failed" });
     }
 });
 
 // LOGIN ROUTER
-
-router.post("/login" , async (req , res) => {
+router.post("/login", async (req, res) => {
     try {
-        const user = await User.findOne({email:req.body.email});
+        const rawEmail = (req.body.email || "").trim();
+        const password = req.body.password;
 
-        if (!user) {
-            return res.status(400).json("Wrong credentials!");
+        if (!rawEmail || !password) {
+            return res.status(400).json({ message: "Email and password are required." });
         }
 
-        const validPassword = await bcrypt.compare(req.body.password, user.password);
+        // Case-insensitive email lookup
+        const user = await User.findOne({
+            email: { $regex: new RegExp(`^${rawEmail}$`, "i") }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "No account found with this email." });
+        }
+
+        const validPassword = await bcrypt.compare(password, user.password);
 
         if (!validPassword) {
-            return res.status(400).json("Wrong password!");
+            return res.status(400).json({ message: "Incorrect password. Please try again." });
         }
 
         return res.status(200).json(user);
     } catch (err) {
-        return res.status(500).json(err);
+        console.error("Login error:", err);
+        return res.status(500).json({ message: err.message || "Server error" });
     }
-})
+});
 
 
 module.exports = router;
