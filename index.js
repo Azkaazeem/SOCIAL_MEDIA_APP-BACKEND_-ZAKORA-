@@ -110,6 +110,37 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
   }
 });
 
+// Signature endpoint for direct Cloudinary uploads (bypasses Vercel 4.5MB serverless limit for large videos)
+app.get("/api/upload/signature", (req, res) => {
+  try {
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const folder = "social-media-app";
+    const apiSecret = (process.env.CLOUDINARY_API_SECRET || "").trim();
+    const apiKey = (process.env.CLOUDINARY_API_KEY || "").trim();
+    const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+
+    if (!apiSecret || !apiKey || !cloudName) {
+      return res.status(500).json({ error: "Cloudinary is not configured properly in environment variables" });
+    }
+
+    const signature = cloudinary.utils.api_sign_request(
+      { folder, timestamp },
+      apiSecret
+    );
+
+    res.status(200).json({
+      signature,
+      timestamp,
+      apiKey,
+      cloudName,
+      folder,
+    });
+  } catch (err) {
+    console.error("Signature generation error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Diagnostic Health Check Route
 app.get("/api/health", async (req, res) => {
   const hasMongoUrl = Boolean(process.env.MONGO_URL || process.env.MONGO_URI);
