@@ -20,17 +20,31 @@ const commentRoute = require("./routes/comments");
 const notificationRoute = require("./routes/notifications");
 const Notification = require("./models/Notification");
 
-// MongoDB Connection
-const MONGO_URI = (process.env.MONGO_URL || process.env.MONGO_URI || "").trim();
+// MongoDB Connection (Serverless Compatible)
+let cachedDb = null;
 
-if (!MONGO_URI) {
-  console.error("MONGO_URL is missing in environment variables!");
-} else {
-  mongoose
-    .connect(MONGO_URI)
-    .then(() => console.log("Connected to MongoDB successfully"))
-    .catch((err) => console.log("MongoDB connection error:", err));
-}
+const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+  if (cachedDb) {
+    return cachedDb;
+  }
+
+  const MONGO_URI = (process.env.MONGO_URL || process.env.MONGO_URI || "").trim();
+  if (!MONGO_URI) {
+    throw new Error("MONGO_URL is missing in environment variables! Please add MONGO_URL in Vercel Project Settings > Environment Variables.");
+  }
+
+  cachedDb = await mongoose.connect(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+  });
+  console.log("Connected to MongoDB successfully");
+  return cachedDb;
+};
+
+// Immediate background connect for local and long-running servers
+connectDB().catch((err) => console.log("Initial MongoDB connection notice:", err.message));
 
 // CORS Configuration
 const allowedOrigins = [
@@ -93,6 +107,53 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json(err);
+  }
+});
+
+// Diagnostic Health Check Route
+app.get("/api/health", async (req, res) => {
+  const hasMongoUrl = Boolean(process.env.MONGO_URL || process.env.MONGO_URI);
+  const stateCodes = ["disconnected", "connected", "connecting", "disconnecting"];
+  const dbState = stateCodes[mongoose.connection.readyState] || mongoose.connection.readyState;
+  
+  let dbError = null;
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await connectDB();
+    } catch (e) {
+      dbError = e.message;
+    }
+  }
+
+  res.status(200).json({
+    status: "ok",
+    hasMongoUrl,
+    dbConnected: mongoose.connection.readyState === 1,
+    dbState,
+    dbError,
+    hasCloudinary: Boolean(process.env.CLOUDINARY_CLOUD_NAME),
+    hasGemini: Boolean(process.env.GEMINI_API_KEY),
+    nodeEnv: process.env.NODE_ENV || "development"
+  });
+});
+
+// Database connection middleware for serverless execution
+app.use(async (req, res, next) => {
+  if (req.path === "/" || req.path === "/api/health") {
+    return next();
+  }
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("Database connection middleware error:", err.message);
+    return res.status(500).json({
+      error: "Database connection failed",
+      message: err.message,
+      tip: !process.env.MONGO_URL && !process.env.MONGO_URI
+        ? "MONGO_URL is not set in Vercel Environment Variables. Please add MONGO_URL in Vercel Project Settings."
+        : "Make sure 0.0.0.0/0 is whitelisted in MongoDB Atlas Network Access."
+    });
   }
 });
 
@@ -233,8 +294,10 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
-  console.log(`Backend server is running on port ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`Backend server is running on port ${PORT}`);
+  });
+}
 
 module.exports = app;

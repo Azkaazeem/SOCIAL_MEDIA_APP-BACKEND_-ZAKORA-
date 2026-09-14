@@ -5,6 +5,7 @@ jspm_packages/
 
 # Environment & Secrets
 .env*
+!.env.example
 
 # Logs & Debug
 logs
