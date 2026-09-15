@@ -20,6 +20,14 @@ const commentRoute = require("./routes/comments");
 const notificationRoute = require("./routes/notifications");
 const Notification = require("./models/Notification");
 
+// Fix querySrv ECONNREFUSED on local machines/Windows DNS resolvers
+const dns = require("dns");
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch (dnsErr) {
+  // Ignore in environments where setting DNS servers is restricted
+}
+
 // MongoDB Connection (Serverless Compatible)
 let cachedDb = null;
 
